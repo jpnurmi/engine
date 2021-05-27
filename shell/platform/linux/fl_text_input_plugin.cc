@@ -41,6 +41,7 @@ static constexpr char kTransform[] = "transform";
 
 static constexpr char kTextAffinityDownstream[] = "TextAffinity.downstream";
 static constexpr char kMultilineInputType[] = "TextInputType.multiline";
+static constexpr char kNoneInputType[] = "TextInputType.none";
 
 static constexpr int64_t kClientIdUnset = -1;
 
@@ -57,6 +58,9 @@ struct FlTextInputPluginPrivate {
 
   // Send newline when multi-line and enter is pressed.
   gboolean input_multiline;
+
+  // Whether to show the on-screen keyboard.
+  gboolean show_osk;
 
   // Input method.
   GtkIMContext* im_context;
@@ -265,17 +269,22 @@ static FlMethodResponse* set_client(FlTextInputPlugin* self, FlValue* args) {
     priv->input_action = g_strdup(fl_value_get_string(input_action_value));
   }
 
-  // Clear the multiline flag, then set it only if the field is multiline.
+  // Reset the input type flags, then set them only if appropriate.
   priv->input_multiline = FALSE;
+  priv->show_osk = TRUE;
   FlValue* input_type_value =
       fl_value_lookup_string(config_value, kTextInputTypeKey);
   if (fl_value_get_type(input_type_value) == FL_VALUE_TYPE_MAP) {
     FlValue* input_type_name =
         fl_value_lookup_string(input_type_value, kTextInputTypeNameKey);
-    if (fl_value_get_type(input_type_name) == FL_VALUE_TYPE_STRING &&
-        g_strcmp0(fl_value_get_string(input_type_name), kMultilineInputType) ==
-            0) {
-      priv->input_multiline = TRUE;
+    if (fl_value_get_type(input_type_name) == FL_VALUE_TYPE_STRING) {
+      if (g_strcmp0(fl_value_get_string(input_type_name),
+                    kMultilineInputType) == 0) {
+        priv->input_multiline = TRUE;
+      } else if (g_strcmp0(fl_value_get_string(input_type_name),
+                           kNoneInputType) == 0) {
+        priv->show_osk = FALSE;
+      }
     }
   }
 
@@ -286,12 +295,14 @@ static FlMethodResponse* set_client(FlTextInputPlugin* self, FlValue* args) {
 static FlMethodResponse* show(FlTextInputPlugin* self) {
   FlTextInputPluginPrivate* priv = static_cast<FlTextInputPluginPrivate*>(
       fl_text_input_plugin_get_instance_private(self));
-  // Set the top-level window used for system input method windows.
-  GdkWindow* window =
-      gtk_widget_get_window(gtk_widget_get_toplevel(GTK_WIDGET(priv->view)));
-  gtk_im_context_set_client_window(priv->im_context, window);
+  if (priv->show_osk == TRUE) {
+    // Set the top-level window used for system input method windows.
+    GdkWindow* window =
+        gtk_widget_get_window(gtk_widget_get_toplevel(GTK_WIDGET(priv->view)));
+    gtk_im_context_set_client_window(priv->im_context, window);
 
-  gtk_im_context_focus_in(priv->im_context);
+    gtk_im_context_focus_in(priv->im_context);
+  }
 
   return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
 }
@@ -573,6 +584,7 @@ static void fl_text_input_plugin_init(FlTextInputPlugin* self) {
   priv->client_id = kClientIdUnset;
   priv->im_context = gtk_im_multicontext_new();
   priv->input_multiline = FALSE;
+  priv->show_osk = TRUE;
   g_signal_connect_object(priv->im_context, "preedit-start",
                           G_CALLBACK(im_preedit_start_cb), self,
                           G_CONNECT_SWAPPED);
